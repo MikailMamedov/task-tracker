@@ -12,26 +12,23 @@ import (
 	_ "github.com/glebarez/go-sqlite"
 )
 
-
 var db *sql.DB
 
 func main() {
 	var err error
 
-	// 1. Открываем файл базы данных (если файла нет, Go сам его создаст)
 	dbPath := os.Getenv("DB_PATH")
 	if dbPath == "" {
 		dbPath = "./tasks.db"
 	}
 
 	db, err = sql.Open("sqlite", dbPath)
-
 	if err != nil {
-		log.Fatalf("Ошибка подключения к БД: %v", err)
+		log.Fatalf("Database connection error: %v", err)
 	}
-	defer db.Close() // Закроет базу, когда сервер остановится
+	defer db.Close()
 
-	// 2. Выполняем SQL-запрос, чтобы создать таблицу, если её еще нет
+	// Initialize database schema if it doesn't exist
 	createTableSQL := `CREATE TABLE IF NOT EXISTS tasks (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		title TEXT NOT NULL,
@@ -40,26 +37,21 @@ func main() {
 		created_at TEXT
 	);`
 	if _, err := db.Exec(createTableSQL); err != nil {
-		log.Fatalf("Ошибка создания таблицы: %v", err)
+		log.Fatalf("Failed to initialize database schema: %v", err)
 	}
 
-	// Инициализируем базовый роутер Gin (он сразу включает логирование запросов)
 	router := gin.Default()
 
-	// Наш тестовый эндпоинт для проверки работоспособности
 	router.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	// Эндпоинт для получения всех задач
 	router.POST("/tasks", createTask)
 	router.GET("/tasks", listTasks)
+	router.GET("/tasks/:id", getTask)
+	router.DELETE("/tasks/:id", deleteTask)
+	router.PATCH("/tasks/:id", updateTask)
 
-	router.GET("/tasks/:id", getTask)      // Получить одну таску по ID
-	router.DELETE("/tasks/:id", deleteTask)   // Удалить таску по ID
-	router.PATCH("/tasks/:id", updateTask) // Частично обновить таску
-
-	// Теперь порт тоже берется из переменных окружения. По умолчанию — 8080.
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -71,14 +63,11 @@ func main() {
 func createTask(c *gin.Context) {
 	var input CreateTaskInput
 
-	// .ShouldBindJSON() читает body запроса и пытается перелить данные в структуру input.
-	// Если в JSON нет поля "title" (которое у нас binding:"required"), Gin сразу вернет ошибку.
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: title is required"})
 		return
 	}
 
-	// 🟢 ДОБАВЛЯЕМ ВАЛИДАЦИЮ ПРИ СОЗДАНИИ:
 	if len(input.Title) > 200 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Title is too long (max 200 chars)"})
 		return
@@ -87,13 +76,11 @@ func createTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Status must be either 'pending' or 'done'"})
 		return
 	}
-	// Бизнес-правило: нельзя закрыть таску, если у неё пустой тайтл
 	if input.Status == "done" && input.Title == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "A task cannot be marked 'done' if it has no title"})
 		return
 	}
 
-	// Выставляем статус по умолчанию (pending), если он пришел пустым
 	status := input.Status
 	if status == "" {
 		status = "pending"
@@ -101,7 +88,6 @@ func createTask(c *gin.Context) {
 
 	createdAt := time.Now().Format(time.RFC3339)
 
-	// Вместо append пишем SQL-запрос INSERT
 	query := `INSERT INTO tasks (title, status, due_date, created_at) VALUES (?, ?, ?, ?)`
 	result, err := db.Exec(query, input.Title, status, input.DueDate, createdAt)
 	if err != nil {
@@ -109,14 +95,12 @@ func createTask(c *gin.Context) {
 		return
 	}
 
-	// Спрашиваем у базы, какой ID она присвоила этой задаче
 	lastInsertID, err := result.LastInsertId()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get ID"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve primary key"})
 		return
 	}
 
-	// Собираем ответ клиенту, используя ID из базы
 	newTask := Task{
 		ID:        int(lastInsertID),
 		Title:     input.Title,
@@ -131,7 +115,6 @@ func createTask(c *gin.Context) {
 func listTasks(c *gin.Context) {
 	status := c.Query("status")
 
-	// Читаем параметры пагинации с дефолтными значениями
 	pageStr := c.DefaultQuery("page", "1")
 	limitStr := c.DefaultQuery("limit", "10")
 
@@ -144,10 +127,8 @@ func listTasks(c *gin.Context) {
 		limit = 10
 	}
 
-	// Вычисляем смещение (сколько строк пропустить)
 	offset := (page - 1) * limit
 
-	// Базовый запрос
 	query := `SELECT id, title, status, due_date, created_at FROM tasks`
 	var args []interface{}
 
@@ -156,10 +137,7 @@ func listTasks(c *gin.Context) {
 		args = append(args, status)
 	}
 
-	// Сортировка идет ДО лимитов
 	query += ` ORDER BY created_at DESC`
-
-	// Добавляем пагинацию в SQL
 	query += ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
 
@@ -185,13 +163,11 @@ func listTasks(c *gin.Context) {
 	c.JSON(http.StatusOK, tasksList)
 }
 
-// 1. GET /tasks/:id — Получение конкретной задачи
 func getTask(c *gin.Context) {
-	id := c.Param("id") // Вытаскиваем id из URL
+	id := c.Param("id")
 	var t Task
 
 	query := `SELECT id, title, status, due_date, created_at FROM tasks WHERE id = ?`
-	// QueryRow используется, когда мы ищем строго одну строку.
 	err := db.QueryRow(query, id).Scan(&t.ID, &t.Title, &t.Status, &t.DueDate, &t.CreatedAt)
 
 	if err == sql.ErrNoRows {
@@ -205,11 +181,9 @@ func getTask(c *gin.Context) {
 	c.JSON(http.StatusOK, t)
 }
 
-// 2. DELETE /tasks/:id — Удаление задачи
 func deleteTask(c *gin.Context) {
 	id := c.Param("id")
 
-	// Проверяем, существует ли вообще такая таска
 	var existsID int
 	err := db.QueryRow(`SELECT id FROM tasks WHERE id = ?`, id).Scan(&existsID)
 	if err == sql.ErrNoRows {
@@ -217,18 +191,15 @@ func deleteTask(c *gin.Context) {
 		return
 	}
 
-	// Удаляем
 	_, err = db.Exec(`DELETE FROM tasks WHERE id = ?`, id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete task"})
 		return
 	}
 
-	// По ТЗ при успешном удалении можно вернуть просто статус 200 OK
 	c.JSON(http.StatusOK, gin.H{"message": "Task deleted successfully"})
 }
 
-// 3. PATCH /tasks/:id — Частичное обновление задачи
 func updateTask(c *gin.Context) {
 	id := c.Param("id")
 	var input UpdateTaskInput
@@ -238,7 +209,6 @@ func updateTask(c *gin.Context) {
 		return
 	}
 
-	// Сначала вытаскиваем текущее состояние задачи из базы
 	var current Task
 	querySelect := `SELECT id, title, status, due_date, created_at FROM tasks WHERE id = ?`
 	err := db.QueryRow(querySelect, id).Scan(&current.ID, &current.Title, &current.Status, &current.DueDate, &current.CreatedAt)
@@ -247,7 +217,7 @@ func updateTask(c *gin.Context) {
 		return
 	}
 
-	// Магия указателей: если поле пришло (не nil), обновляем его. Если nil — оставляем старое значение из базы.
+	// Merge patch inputs with current state
 	if input.Title != nil {
 		current.Title = *input.Title
 	}
@@ -258,7 +228,6 @@ func updateTask(c *gin.Context) {
 		current.DueDate = *input.DueDate
 	}
 
-	// Валидируем то, что получилось после слияния старых и новых данных
 	if len(current.Title) > 200 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Title can't exceed 200 characters"})
 		return
@@ -267,13 +236,11 @@ func updateTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Status must be 'pending' or 'done'"})
 		return
 	}
-	// Проверяем наше критическое правило ТЗ
 	if current.Status == "done" && current.Title == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "A task cannot be marked 'done' if it has no title"})
 		return
 	}
 
-	// Сохраняем обновленные данные обратно в базу
 	queryUpdate := `UPDATE tasks SET title = ?, status = ?, due_date = ? WHERE id = ?`
 	_, err = db.Exec(queryUpdate, current.Title, current.Status, current.DueDate, id)
 	if err != nil {
