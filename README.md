@@ -1,6 +1,3 @@
-Вот полный текст файла `README.md`, объединяющий исходное описание и недостающие разделы согласно ТЗ, без лишних комментариев:
-
-```markdown
 # Personal Task Tracker API
 
 A lightweight, robust, and containerized RESTful API for managing a personal list of tasks. Built from scratch using Go, the Gin framework, and a CGO-free SQLite driver. Designed to run seamlessly in isolated environments (such as WSL/Docker) without external dependencies.
