@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -130,18 +131,37 @@ func createTask(c *gin.Context) {
 func listTasks(c *gin.Context) {
 	status := c.Query("status")
 
+	// Читаем параметры пагинации с дефолтными значениями
+	pageStr := c.DefaultQuery("page", "1")
+	limitStr := c.DefaultQuery("limit", "10")
+
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit < 1 {
+		limit = 10
+	}
+
+	// Вычисляем смещение (сколько строк пропустить)
+	offset := (page - 1) * limit
+
 	// Базовый запрос
 	query := `SELECT id, title, status, due_date, created_at FROM tasks`
 	var args []interface{}
 
-	// Если передан фильтр по статусу, динамически расширяем SQL-запрос
 	if status != "" {
 		query += ` WHERE status = ?`
 		args = append(args, status)
 	}
 
-	// Сортировка всегда применяется в конце запроса
+	// Сортировка идет ДО лимитов
 	query += ` ORDER BY created_at DESC`
+
+	// Добавляем пагинацию в SQL
+	query += ` LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
