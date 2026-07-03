@@ -4,18 +4,31 @@ A lightweight, robust, and containerized RESTful API for managing a personal lis
 
 ## Architecture & Tech Stack
 
-- **Language:** Go (1.26+)
-- **Web Framework:** [Gin Gonic](https://github.com/gin-gonic/gin) (chosen for its high-performance routing, built-in logging, and clean middleware ecosystem)
-- **Database:** SQLite via `github.com/glebarez/go-sqlite`
-- **Containerization:** Docker & Docker Compose (Multi-stage production build)
+* **Language:** Go (1.26+)
+* **Web Framework:** [Gin Gonic](https://github.com/gin-gonic/gin) (chosen for its high-performance routing, built-in logging, and clean middleware ecosystem)
+* **Database:** SQLite via `github.com/glebarez/go-sqlite`
+* **Containerization:** Docker & Docker Compose (Multi-stage production build)
 
 ### Engineering Decisions & Justifications
 
 1. **Pure Go SQLite Driver (CGO-free):**
-   Instead of using the standard `mattn/go-sqlite3` driver which relies on GCC and CGO, this project implements `github.com/glebarez/go-sqlite`. This architectural choice completely eliminates dynamic linking issues during cross-compilation, avoids heavy Windows/WSL security blocking policies (like AppLocker blocking host `.exe` execution), and guarantees highly deterministic builds inside minimal Scratch/Alpine Docker stages.
-
+Instead of using the standard `mattn/go-sqlite3` driver which relies on GCC and CGO, this project implements `github.com/glebarez/go-sqlite`. This architectural choice completely eliminates dynamic linking issues during cross-compilation, avoids heavy Windows/WSL security blocking policies (like AppLocker blocking host `.exe` execution), and guarantees highly deterministic builds inside minimal Scratch/Alpine Docker stages.
 2. **Pointers for Partial Updates (PATCH `/tasks/:id`):**
-   To distinguish between a field explicitly sent as an empty string `""` versus a field completely omitted from the JSON request payload (`nil`), the request structure utilizes Go pointers (`*string`). This ensures that if a user updates only the status, the existing title remains untouched instead of being wiped out by empty defaults.
+To distinguish between a field explicitly sent as an empty string `""` versus a field completely omitted from the JSON request payload (`nil`), the request structure utilizes Go pointers (`*string`). This ensures that if a user updates only the status, the existing title remains untouched instead of being wiped out by empty defaults.
+
+---
+
+## Quick Start (How to Run)
+
+To spin up the application infrastructure locally for the first time, execute:
+
+```bash
+# Build the multi-stage image and run the stack in detached mode
+docker compose up --build -d
+
+```
+
+The API engine will initialize the SQLite schema and start listening for inbound traffic on `http://localhost:8080`.
 
 ---
 
@@ -112,7 +125,3 @@ docker compose down -v && docker compose build --no-cache && docker compose up -
 ## Assumptions Made
 
 * **Timezone Standard:** The specification left storage representations ambiguous. I assumed standardizing metadata serialization onto ISO 8601 strings (`YYYY-MM-DD` and RFC3339 timestamps) satisfies both deterministic sorting (`created_at DESC`) and client-side timezone rendering neutrality.
-
-```
-
-```
