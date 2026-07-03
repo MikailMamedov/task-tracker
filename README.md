@@ -1,3 +1,4 @@
+```markdown
 # Personal Task Tracker API
 
 A lightweight, robust, and containerized RESTful API for managing a personal list of tasks. Built from scratch using Go, the Gin framework, and a CGO-free SQLite driver. Designed to run seamlessly in isolated environments (such as WSL/Docker) without external dependencies.
@@ -62,6 +63,15 @@ docker compose down
 
 ```
 
+### Running Integration Tests
+
+Automated integration tests run within an isolated in-memory environment via a temporary container to keep the host database clean. To execute the test suite, run:
+
+```bash
+docker run --rm -v $(pwd):/app -w /app golang:alpine go test -v ./...
+
+```
+
 ---
 
 ## API Endpoint Specification
@@ -72,6 +82,7 @@ docker compose down
 * **Path:** `/tasks`
 * **Headers:** `Content-Type: application/json`
 * **Payload:**
+
 ```json
 {
   "title": "Implement Docker Compose Configuration",
@@ -80,8 +91,8 @@ docker compose down
 
 ```
 
+* **Success Response (`201 Created`):**
 
-* **Success Response (`214 Created`):**
 ```json
 {
   "id": 1,
@@ -93,17 +104,19 @@ docker compose down
 
 ```
 
-
-
-### 2. List All Tasks (With Optional Status Filtering)
+### 2. List All Tasks (With Filtering & Pagination)
 
 * **HTTP Method:** `GET`
 * **Path:** `/tasks`
-* **Query Parameters:** `status` (Optional. Values: `pending` or `done`)
+* **Query Parameters:** - `status` (Optional. Values: `pending` or `done`)
+* `page` (Optional. Default: `1`)
+* `limit` (Optional. Default: `10`)
+
+
 * **Sorting:** Strictly auto-sorted by creation date descending (`created_at DESC`).
 * **Examples:**
-* Get all tasks: `GET http://localhost:8080/tasks`
-* Filter only completed tasks: `GET http://localhost:8080/tasks?status=done`
+* Get all tasks (Default page/limit): `GET http://localhost:8080/tasks`
+* Filter completed tasks with custom pagination: `GET http://localhost:8080/tasks?status=done&page=2&limit=5`
 
 
 
@@ -119,13 +132,13 @@ docker compose down
 * **HTTP Method:** `PATCH`
 * **Path:** `/tasks/:id`
 * **Payload:** (Can pass any combination of fields)
+
 ```json
 {
   "status": "done"
 }
 
 ```
-
 
 * **Error Response (`400 Bad Request`):** Sent if an invalid status value is passed or if the update results in a `done` task with an empty title.
 
@@ -142,3 +155,7 @@ docker compose down
 * **Strict Title Length Constraints:** Enforced a `max 200` character limit to protect the data layer against buffer-bloat payloads.
 * **SQL Injection Mitigation:** Every interaction with the SQLite database utilizes parameterized query placeholders (`?`) rather than unchecked string formatting.
 * **Graceful DB Connection Shutdown:** Implemented connection pools cleanup mechanisms via `defer db.Close()` on application signals.
+
+```
+
+```
