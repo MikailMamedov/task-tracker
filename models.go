@@ -15,3 +15,12 @@ type CreateTaskInput struct {
 	Status  string `json:"status"`
 	DueDate string `json:"due_date"`
 }
+
+// UpdateTaskInput использует указатели (*string), чтобы мы могли отличить:
+// 1. Поле вообще не передали в JSON (будет nil)
+// 2. Поле передали пустым (будет указатель на пустую строку "")
+type UpdateTaskInput struct {
+	Title   *string `json:"title"`
+	Status  *string `json:"status"`
+	DueDate *string `json:"due_date"`
+}

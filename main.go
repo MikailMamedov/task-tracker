@@ -10,8 +10,6 @@ import (
 	_ "github.com/glebarez/go-sqlite"
 )
 
-// var tasks = []Task{}
-// var nextID = 1
 
 var db *sql.DB
 
@@ -49,6 +47,10 @@ func main() {
 	router.POST("/tasks", createTask)
 	router.GET("/tasks", listTasks)
 
+	router.GET("/tasks/:id", getTask)      // Получить одну таску по ID
+	router.DELETE("/tasks/:id", deleteTask)   // Удалить таску по ID
+	router.PATCH("/tasks/:id", updateTask) // Частично обновить таску
+
 	// Запускаем сервер на порту 8080
 	router.Run(":8080")
 }
@@ -60,6 +62,21 @@ func createTask(c *gin.Context) {
 	// Если в JSON нет поля "title" (которое у нас binding:"required"), Gin сразу вернет ошибку.
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: title is required"})
+		return
+	}
+
+	// 🟢 ДОБАВЛЯЕМ ВАЛИДАЦИЮ ПРИ СОЗДАНИИ:
+	if len(input.Title) > 200 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Title is too long (max 200 chars)"})
+		return
+	}
+	if input.Status != "" && input.Status != "pending" && input.Status != "done" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Status must be either 'pending' or 'done'"})
+		return
+	}
+	// Бизнес-правило: нельзя закрыть таску, если у неё пустой тайтл
+	if input.Status == "done" && input.Title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "A task cannot be marked 'done' if it has no title"})
 		return
 	}
 
@@ -95,23 +112,9 @@ func createTask(c *gin.Context) {
 		CreatedAt: createdAt,
 	}
 
-	// // Инкрементируем ID для следующей задачи
-	// nextID++
-
-	// // Добавляем новинку в наш глобальный список задач
-	// tasks = append(tasks, newTask)
-
-	// // Возвращаем созданную таску со статусом 201 Created
-	// c.JSON(http.StatusCreated, newTask)
-
 	c.JSON(http.StatusCreated, newTask)
 }
 
-// Handler для получения списка задач
-// func listTasks(c *gin.Context) {
-// 	// Просто отдаем весь наш массив в формате JSON
-// 	c.JSON(http.StatusOK, tasks)
-// }
 
 func listTasks(c *gin.Context) {
 	// 1. Делаем запрос SELECT в базу данных
@@ -139,4 +142,103 @@ func listTasks(c *gin.Context) {
 
 	// 3. Отдаем клиенту заполненный список
 	c.JSON(http.StatusOK, tasksList)
+}
+
+// 1. GET /tasks/:id — Получение конкретной задачи
+func getTask(c *gin.Context) {
+	id := c.Param("id") // Вытаскиваем id из URL
+	var t Task
+
+	query := `SELECT id, title, status, due_date, created_at FROM tasks WHERE id = ?`
+	// QueryRow используется, когда мы ищем строго одну строку.
+	err := db.QueryRow(query, id).Scan(&t.ID, &t.Title, &t.Status, &t.DueDate, &t.CreatedAt)
+
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
+		return
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+
+	c.JSON(http.StatusOK, t)
+}
+
+// 2. DELETE /tasks/:id — Удаление задачи
+func deleteTask(c *gin.Context) {
+	id := c.Param("id")
+
+	// Проверяем, существует ли вообще такая таска
+	var existsID int
+	err := db.QueryRow(`SELECT id FROM tasks WHERE id = ?`, id).Scan(&existsID)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
+		return
+	}
+
+	// Удаляем
+	_, err = db.Exec(`DELETE FROM tasks WHERE id = ?`, id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete task"})
+		return
+	}
+
+	// По ТЗ при успешном удалении можно вернуть просто статус 200 OK
+	c.JSON(http.StatusOK, gin.H{"message": "Task deleted successfully"})
+}
+
+// 3. PATCH /tasks/:id — Частичное обновление задачи
+func updateTask(c *gin.Context) {
+	id := c.Param("id")
+	var input UpdateTaskInput
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	// Сначала вытаскиваем текущее состояние задачи из базы
+	var current Task
+	querySelect := `SELECT id, title, status, due_date, created_at FROM tasks WHERE id = ?`
+	err := db.QueryRow(querySelect, id).Scan(&current.ID, &current.Title, &current.Status, &current.DueDate, &current.CreatedAt)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
+		return
+	}
+
+	// Магия указателей: если поле пришло (не nil), обновляем его. Если nil — оставляем старое значение из базы.
+	if input.Title != nil {
+		current.Title = *input.Title
+	}
+	if input.Status != nil {
+		current.Status = *input.Status
+	}
+	if input.DueDate != nil {
+		current.DueDate = *input.DueDate
+	}
+
+	// Валидируем то, что получилось после слияния старых и новых данных
+	if len(current.Title) > 200 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Title can't exceed 200 characters"})
+		return
+	}
+	if current.Status != "pending" && current.Status != "done" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Status must be 'pending' or 'done'"})
+		return
+	}
+	// Проверяем наше критическое правило ТЗ
+	if current.Status == "done" && current.Title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "A task cannot be marked 'done' if it has no title"})
+		return
+	}
+
+	// Сохраняем обновленные данные обратно в базу
+	queryUpdate := `UPDATE tasks SET title = ?, status = ?, due_date = ? WHERE id = ?`
+	_, err = db.Exec(queryUpdate, current.Title, current.Status, current.DueDate, id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update task"})
+		return
+	}
+
+	c.JSON(http.StatusOK, current)
 }
