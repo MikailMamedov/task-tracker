@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -17,7 +18,13 @@ func main() {
 	var err error
 
 	// 1. Открываем файл базы данных (если файла нет, Go сам его создаст)
-	db, err = sql.Open("sqlite", "./tasks.db")
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "./tasks.db"
+	}
+
+	db, err = sql.Open("sqlite", dbPath)
+
 	if err != nil {
 		log.Fatalf("Ошибка подключения к БД: %v", err)
 	}
@@ -51,8 +58,13 @@ func main() {
 	router.DELETE("/tasks/:id", deleteTask)   // Удалить таску по ID
 	router.PATCH("/tasks/:id", updateTask) // Частично обновить таску
 
-	// Запускаем сервер на порту 8080
-	router.Run(":8080")
+	// Теперь порт тоже берется из переменных окружения. По умолчанию — 8080.
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	router.Run(":" + port)
 }
 
 func createTask(c *gin.Context) {
@@ -115,32 +127,41 @@ func createTask(c *gin.Context) {
 	c.JSON(http.StatusCreated, newTask)
 }
 
-
 func listTasks(c *gin.Context) {
-	// 1. Делаем запрос SELECT в базу данных
-	query := `SELECT id, title, status, due_date, created_at FROM tasks ORDER BY created_at DESC`
-	rows, err := db.Query(query)
+	status := c.Query("status")
+
+	// Базовый запрос
+	query := `SELECT id, title, status, due_date, created_at FROM tasks`
+	var args []interface{}
+
+	// Если передан фильтр по статусу, динамически расширяем SQL-запрос
+	if status != "" {
+		query += ` WHERE status = ?`
+		args = append(args, status)
+	}
+
+	// Сортировка всегда применяется в конце запроса
+	query += ` ORDER BY created_at DESC`
+
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch tasks"})
 		return
 	}
-	defer rows.Close() // Чистим за собой память
+	defer rows.Close()
 
-	var tasksList = []Task{} // Создаем пустой срез, куда будем складывать строки
+	var tasksList = []Task{}
 
-	// 2. Бежим циклом по всем строкам, которые вернула база
 	for rows.Next() {
 		var t Task
-		// rows.Scan по очереди берет значения из колонок SQL и записывает в поля структуры t
 		err := rows.Scan(&t.ID, &t.Title, &t.Status, &t.DueDate, &t.CreatedAt)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error scanning data"})
 			return
 		}
-		tasksList = append(tasksList, t) // Добавляем заполненную таску в наш список
+		tasksList = append(tasksList, t)
 	}
 
-	// 3. Отдаем клиенту заполненный список
 	c.JSON(http.StatusOK, tasksList)
 }
 

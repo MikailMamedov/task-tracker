@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  task-tracker-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: task-tracker-app
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DB_PATH=/root/tasks.db
+    volumes:
+      - task_tracker_data:/root
+    restart: unless-stopped
+
+volumes:
+  task_tracker_data:
